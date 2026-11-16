@@ -2,9 +2,9 @@
 
 A staged demo: start with a procedure in Markdown, generate code to execute it, then reuse a validated script inside the skill.
 
-## Phase 1 — Shared foundation
+## Shared foundation
 
-This checkout contains the orders simulator and native MCP connections. Agent behavior is introduced in the next phases.
+This checkout contains the shared infrastructure and the phase-two investigation agent: one Markdown procedure, optional Code Mode and independent reads that may run concurrently.
 
 | Component | Purpose |
 | --- | --- |
@@ -14,7 +14,7 @@ This checkout contains the orders simulator and native MCP connections. Agent be
 | Gmail through Composio | Provide the incident email |
 | Notion through Composio | Store the investigation result |
 
-The simulator uses PyMongo and Logfire directly. Agent integrations expose the full native MCP toolsets through capabilities with deferred loading. Application procedures will live in the skill, not in integration wrappers.
+The simulator uses PyMongo and Logfire directly. Agent integrations expose the full native MCP toolsets through capabilities with deferred loading. The investigation procedure lives in the skill, not in integration wrappers.
 
 ## Setup
 
@@ -59,7 +59,7 @@ Other Mongo databases, Gmail messages, Notion incidents and historical Logfire t
 ## Connect the external sources
 
 1. In `orders-app/.env`, set `LOGFIRE_TOKEN` to a project write token. To generate real evidence, run `make seed SCENARIO=live-demo`. Use `make recover SCENARIO=live-demo` later to trace recovery.
-2. In `investigation-agent/.env`, set a Logfire API key with `project:read` access. Set `LOGFIRE_MCP_URL` to your region's endpoint (the example uses EU). Set `LOGFIRE_PROJECT` to the project containing the simulator traces. This will guide the agent queries in phase 2; the phase-1 connectivity check only lists tools. Trace ingestion selects its destination through the simulator write token, not this variable. The agent environment also includes `LOGFIRE_TOKEN` for its own execution traces in phase 2. Use a write token from the same project; the agent will use a separate service name from the orders simulator. Phase 1 connection checks do not emit agent traces.
+2. In `investigation-agent/.env`, set a Logfire API key with `project:read` access. Set `LOGFIRE_MCP_URL` to your region's endpoint (the example uses EU). Set `LOGFIRE_PROJECT` to the project containing the simulator traces. This guides the agent queries; the connectivity check only lists tools. Trace ingestion selects its destination through the simulator write token, not this variable. The agent environment also includes `LOGFIRE_TOKEN` for its own execution traces in phase 2. Use a write token from the same project; the agent will use a separate service name from the orders simulator. Phase 1 connection checks do not emit agent traces.
 3. In Composio, connect the Gmail inbox and Notion workspace. Put the Composio API key and both connected-account IDs in `investigation-agent/.env`. The key must allow reading connected accounts and creating tool-router sessions; executing tools in later phases also needs execution permission.
 4. Give the Notion connection access to an `Incidents` database with the properties below.
 
@@ -80,7 +80,48 @@ make check-mcp SERVICE=gmail
 
 `make check-mcp` checks Logfire, Gmail, Notion and Mongo by default, reporting each result even if another connection fails. It exits unsuccessfully if any check fails. Use `SERVICE=logfire|gmail|notion|mongo` to select one service. These checks initialize MCP and list its tools. Composio checks create an application-scoped session. They do not read email messages, execute application tools or write Notion pages. Successful tool listing proves connectivity, not that the future investigation workflow works.
 
-Private credentials are ignored by Git. No credentials, connected-account IDs or private data are bundled in this repository. No model key is needed in phase 1.
+Private credentials are ignored by Git. No credentials, connected-account IDs or private data are bundled in this repository. The simulator and connectivity checks need no model key.
+
+## Run an investigation
+
+In `investigation-agent/.env`, configure `OPENAI_API_KEY`, `MODEL`,
+`GMAIL_ACCOUNT_EMAIL` (the receiving inbox), `NOTION_DATABASE_NAME`,
+`LOGFIRE_PROJECT` and `LOGFIRE_TOKEN`, along with the MCP credentials above.
+The agent uses service name `orders-investigation-agent`; simulator traces use
+`orders-sync-demo`. Agent tracing includes model and tool content, so use demo data.
+Run `make setup` after updating this checkout to install the locked dependencies.
+
+```sh
+make up
+make investigate SENDER=customer@example.com CODE_MODE=0 SCENARIO=demo
+make investigate SENDER=customer@example.com CODE_MODE=1 SCENARIO=demo
+```
+
+Replace the sender with the customer's seeded email and use the same scenario as
+`make seed`. Run the two investigations sequentially. Both select the latest inbox
+message from the sender, including read messages, identify the customer in Mongo,
+inspect orders and Logfire evidence, then create or reuse the Notion incident and
+read it back before returning a diagnosis. Repeated manual runs still investigate;
+there is no processed-email ledger. Notion deduplication uses the Gmail message ID
+and is not an atomic uniqueness constraint.
+
+`CODE_MODE=0` calls tools directly. `CODE_MODE=1` enables native Code Mode so the
+model can generate Python for Monty to execute. The same skill describes independent
+reads and dependencies without runtime-specific instructions. This phase does not
+instruct the model to combine the entire process into one program. Concurrency and
+the chosen sequence remain model decisions; enabling the mode alone does not prove
+that tools overlapped or that fewer model calls were used.
+
+The terminal shows the diagnosis and usage: model requests, input/output tokens,
+Code Mode blocks, tool retries and elapsed time. Total time includes connection
+setup; agent time starts after setup. These are not counts of individual MCP calls.
+The CLI has a five-minute whole-run deadline (`investigate --timeout` overrides it).
+After a timeout, inspect Notion before retrying because a write may have completed.
+
+There is no Temporal scheduler, automatic follow-up or stored Python skill script
+in this phase. `make recover` changes the orders; rerunning the investigation can
+then update the existing Notion incident according to the current order state.
+Historical failure traces alone do not mean the incident remains open.
 
 ## Repository layout
 
@@ -91,16 +132,21 @@ investigation-agent/
     capabilities/              Native MCP toolset composition
     integrations/composio.py   Composio session connection
     connections.py            Explicit MCP connectivity check
+    agent.py                   Agent and optional native Code Mode
+    runner.py                  Connections, execution and usage reporting
+    cli.py                     Manual command and Logfire instrumentation
+    models.py                  Investigation input and diagnosis
+    skills/investigate-incident/ Markdown investigation procedure
   mcp/mongodb/                 Official Node MCP server and npm lockfile
 compose.yaml                   Local MongoDB
-Makefile                       Setup, simulator and connection commands
+Makefile                       Setup, simulator, connection and investigation commands
 ```
 
 ## Planned checkpoints
 
-1. Shared foundation (this phase).
-2. Markdown skill with direct MCP tool calls.
-3. The same procedure with model-generated Code Mode programs.
+1. Shared foundation.
+2. Markdown skill with optional Code Mode and concurrent independent reads (this phase).
+3. Explicitly optimize Code Mode to chain the procedure into fewer programs.
 4. A validated parameterized script bundled with the skill.
 
 Each phase will be reviewed before its commit. Tags for the three agent stages will be created when those stages are validated. Temporal and automated follow-up are outside the initial talk's three-stage comparison.
