@@ -1,10 +1,15 @@
 {
   "revision": "r1",
-  "status": "active",
+  "status": "superseded",
   "base_revision": null,
   "reason": "Initial saved program, adapted from a successful improver run.",
   "failure_id": null,
   "source_traces": [],
-  "checks": {"passed": true, "problems": []},
-  "verification": {"complete": true}
+  "checks": {
+    "passed": true,
+    "problems": []
+  },
+  "verification": {
+    "complete": true
+  }
 }

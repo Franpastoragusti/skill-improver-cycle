@@ -1,0 +1,16 @@
+{
+  "id": "f20261116-181835",
+  "created_at": "2026-11-16T18:18:35.597291+00:00",
+  "status": "candidate_created",
+  "revision": "r1",
+  "kind": "incomplete",
+  "error": "Unexpected Notion incident query response: {\"has_more\": false, \"next_cursor\": null, \"object\": \"list\", \"page_or_database\": {}, \"request_id\": \"f7fdee4d-7ac6-4de5-bb03-e30760d8468e\", \"results\": [], \"type\": \"page_or_database\"}",
+  "classification": "contract",
+  "trace_id": "01a1e593e44cc29efa26755002713024",
+  "recovered_with_markdown": true,
+  "request": {
+    "sender": "support@aster.example",
+    "scenario": "demo"
+  },
+  "candidate": "r2"
+}

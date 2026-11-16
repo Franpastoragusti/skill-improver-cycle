@@ -250,7 +250,7 @@ async def run_investigation(params):
         matches = {}
         while True:
             response = unwrap(await notion_NOTION_QUERY_DATABASE_WITH_FILTER(database_id=dbid,filter=native({'property':'Gmail Message ID','rich_text':{'equals':mid}}),page_size=100,start_cursor=cursor))
-            if not isinstance(response,dict) or not isinstance(response.get('results'),list):
+            if not isinstance(response,dict) or not isinstance(response.get('pages'),list):
                 raise ValueError('Unexpected Notion incident query response: ' + json.dumps(response)[:1000])
             for page in response['results']:
                 if active(page):

@@ -1,0 +1,23 @@
+{
+  "revision": "r2",
+  "status": "active",
+  "base_revision": "r1",
+  "created_at": "2026-11-16T18:24:28.903303+00:00",
+  "reason": "query_incident checked for a 'pages' list, but Notion returned the valid 'results' list. This rejected successful queries before incident creation or reuse; the recorded recovery confirmed the correct response shape. Change: Changed only the validation key from 'pages' to 'results', matching the existing iteration. Preserved pagination, duplicate checks, create/update/reuse branches and readback verification. The full test completed for Gmail message 1a1dae0ac8e34b90 and created verified Notion page 41a59563-fc67-8158-8dce-ecb5f1482813 with status 'Awaiting intervention'; no blocker remained.",
+  "failure_id": "f20261116-181835",
+  "source_traces": [
+    "01a1e593e44cc29efa26755002713024",
+    "01a1e598af4d4d907f40f8abe6588adb"
+  ],
+  "checks": {
+    "passed": true,
+    "problems": []
+  },
+  "verification": {
+    "complete": true,
+    "notion_page_url": "https://app.notion.com/............",
+    "write_action": "created"
+  },
+  "replaced": "r1",
+  "activated_at": "2026-11-16T18:26:47.861697+00:00"
+}
