@@ -4,7 +4,7 @@ A staged demo: start with a procedure in Markdown, generate code to execute it, 
 
 ## Shared foundation
 
-This checkout contains the shared infrastructure and the phase-two investigation agent: one Markdown procedure, optional Code Mode and independent reads that may run concurrently.
+This checkout contains the shared infrastructure and the phase-three investigator and script improver: two agents sharing one Markdown procedure and the same MCP connections.
 
 | Component | Purpose |
 | --- | --- |
@@ -106,16 +106,52 @@ there is no processed-email ledger. Notion deduplication uses the Gmail message 
 and is not an atomic uniqueness constraint.
 
 `CODE_MODE=0` calls tools directly. `CODE_MODE=1` enables native Code Mode so the
-model can generate Python for Monty to execute. The same skill describes independent
-reads and dependencies without runtime-specific instructions. This phase does not
-instruct the model to combine the entire process into one program. Concurrency and
-the chosen sequence remain model decisions; enabling the mode alone does not prove
-that tools overlapped or that fewer model calls were used.
+investigator can generate Python for Monty to execute. Both modes use the same
+Markdown procedure. The investigator has no special instructions to optimize the
+whole process into one program; it remains the phase-two execution baseline.
 
-The terminal shows the diagnosis and usage: model requests, input/output tokens,
-Code Mode blocks, tool retries and elapsed time. Total time includes connection
-setup; agent time starts after setup. These are not counts of individual MCP calls.
-The CLI has a five-minute whole-run deadline (`investigate --timeout` overrides it).
+## Improve the investigation program
+
+```sh
+make improve SENDER=customer@example.com SCENARIO=demo
+```
+
+This launches a different agent, `investigation-script-improver`, with Code Mode
+always enabled. It loads the same skill and MCP catalogs, generates a program,
+executes it and uses execution errors to correct it. Its own CLI and runner select its model, deadline and tracing identity; the shared
+infrastructure does not route between agents. Its objective is a complete,
+verified investigation in as few programs as practical, ideally one. It has the
+Monty compatibility and chaining instructions; the investigator does not.
+
+**Improvement runs execute real tools:** they read the selected email, Mongo and
+Logfire and may create or update its Notion incident. They use the same lookup and
+readback procedure, so run them sequentially with investigations. This is not an
+offline code generator. The generated programs and tool events are recorded through Logfire instrumentation;
+they are candidates for review, not automatically published into the skill.
+Persisting a reusable parameterized script and invoking it from the investigator
+belongs to phase four.
+
+| Agent | Model setting (default) | Reasoning setting (default) | Deadline | Logfire service |
+| --- | --- | --- | --- | --- |
+| Investigator | `MODEL` (`openai:gpt-6-luna`) | `REASONING_EFFORT` (`high`) | 300 seconds | `orders-investigation-agent` |
+| Script improver | `IMPROVER_MODEL` (`openai:gpt-6.1-sol`) | `IMPROVER_REASONING_EFFORT` (`high`) | 600 seconds | `investigation-script-improver` |
+
+Existing `.env` files can omit the new settings and use those defaults. They share
+`OPENAI_API_KEY`, MCP credentials and the Logfire write token. A `MODEL` override
+only affects the investigator; use `IMPROVER_MODEL` for the improver. Both CLI entry
+points accept `--timeout`. Run `make setup` to install the new `improve` entry point.
+
+One successful case validates that path only. Discovery, unexpected schemas and
+recovery can require additional model calls or programs. Compare program counts,
+requests, tokens, time and verified outcomes; differences between these two agents
+also reflect their models and objectives, not just whether Code Mode is enabled.
+For the phase-two direct/Code Mode comparison, use `make investigate` for both.
+
+The commands do not print agent events, generated code, the final diagnosis or
+usage summaries. Inspect Logfire for the structured final result, model usage,
+generated programs, tool events, retries and span durations. Each runner calls `agent.run` directly and returns the diagnosis to its caller; observability
+comes from PydanticAI instrumentation rather than console output.
+Whole-run deadlines include connection setup and are configurable with `--timeout`.
 After a timeout, inspect Notion before retrying because a write may have completed.
 
 There is no Temporal scheduler, automatic follow-up or stored Python skill script
@@ -126,27 +162,37 @@ Historical failure traces alone do not mean the incident remains open.
 ## Repository layout
 
 ```text
-orders-app/                    Simulator, integration tests and Python lockfile
+orders-app/                         Simulator, tests and Python lockfile
 investigation-agent/
-  src/investigation_agent/
-    capabilities/              Native MCP toolset composition
-    integrations/composio.py   Composio session connection
-    connections.py            Explicit MCP connectivity check
-    agent.py                   Agent and optional native Code Mode
-    runner.py                  Connections, execution and usage reporting
-    cli.py                     Manual command and Logfire instrumentation
-    models.py                  Investigation input and diagnosis
-    skills/investigate-incident/ Markdown investigation procedure
-  mcp/mongodb/                 Official Node MCP server and npm lockfile
-compose.yaml                   Local MongoDB
-Makefile                       Setup, simulator, connection and investigation commands
+  src/skill_improve_cycle/
+    common/
+      capabilities/                 Native MCP toolsets
+      integrations/                 Composio sessions
+      skills/investigate-incident/  Shared Markdown procedure
+      composition.py                Skill and toolset composition
+      runtime.py                    Input preparation and MCP setup
+      command_support.py            CLI and telemetry primitives
+      connections.py                MCP connectivity checks
+      models.py                     Shared input and diagnosis
+      paths.py                      Local Node server location
+    investigator/
+      agent.py
+      runner.py
+      cli.py
+    improver/
+      agent.py
+      runner.py
+      cli.py
+  mcp/mongodb/                      Official Node MCP server and lockfile
+compose.yaml                        Local MongoDB
+Makefile                            Setup, simulator and agent commands
 ```
 
 ## Planned checkpoints
 
 1. Shared foundation.
-2. Markdown skill with optional Code Mode and concurrent independent reads (this phase).
-3. Explicitly optimize Code Mode to chain the procedure into fewer programs.
+2. Markdown skill with optional Code Mode and concurrent independent reads.
+3. A separate Code Mode improver generates and refines the procedure into fewer programs (this phase).
 4. A validated parameterized script bundled with the skill.
 
 Each phase will be reviewed before its commit. Tags for the three agent stages will be created when those stages are validated. Temporal and automated follow-up are outside the initial talk's three-stage comparison.

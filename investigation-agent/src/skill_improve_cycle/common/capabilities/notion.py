@@ -3,7 +3,7 @@
 from pydantic_ai.capabilities import Capability
 from pydantic_ai.mcp import MCPToolset
 
-from investigation_agent.integrations.composio import composio_client
+from skill_improve_cycle.common.integrations.composio import composio_client
 
 
 async def notion_capability(*, client=None) -> Capability:

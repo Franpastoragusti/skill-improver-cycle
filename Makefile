@@ -6,7 +6,7 @@ SENDER ?=
 CODE_MODE ?= 0
 export SCENARIO SERVICE SENDER CODE_MODE
 
-.PHONY: help setup up down status seed recover reset-orders check-mcp test investigate
+.PHONY: help setup up down status seed recover reset-orders check-mcp test investigate improve
 help:
 	@echo "setup       Install dependencies and create missing private .env files"
 	@echo "up/down     Start or stop Mongo (data is preserved)"
@@ -16,6 +16,7 @@ help:
 	@echo "reset-orders Clear orders and attempts, preserve customers; then run seed"
 	@echo "check-mcp   Check all four MCPs; optionally SERVICE=mongo|logfire|gmail|notion"
 	@echo "investigate Investigate latest email: SENDER=address CODE_MODE=0|1"
+	@echo "improve     Generate/test a script with the improver: SENDER=address"
 	@echo "test        Run local simulator and offline connection tests"
 
 setup:
@@ -55,3 +56,7 @@ investigate:
 	@test -n "$$SENDER" || { echo 'Set SENDER to the customer email address.' >&2; exit 2; }
 	@case "$$CODE_MODE" in 0) mode_flag=;; 1) mode_flag=--code-mode;; *) echo 'CODE_MODE must be 0 or 1.' >&2; exit 2;; esac; \
 	cd investigation-agent && uv run --locked --env-file .env investigate --sender "$$SENDER" --scenario "$$SCENARIO" $$mode_flag
+
+improve:
+	@test -n "$$SENDER" || { echo 'Set SENDER to the customer email address.' >&2; exit 2; }
+	cd investigation-agent && uv run --locked --env-file .env improve --sender "$$SENDER" --scenario "$$SCENARIO"

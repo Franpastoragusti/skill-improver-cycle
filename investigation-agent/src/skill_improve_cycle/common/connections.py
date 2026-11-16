@@ -7,9 +7,9 @@ import sys
 
 from fastmcp import Client
 
-from investigation_agent.capabilities.logfire import LOGFIRE_URL
-from investigation_agent.capabilities.mongo import mongo_client
-from investigation_agent.integrations.composio import composio_client, required
+from skill_improve_cycle.common.capabilities.logfire import LOGFIRE_URL
+from skill_improve_cycle.common.capabilities.mongo import mongo_client
+from skill_improve_cycle.common.integrations.composio import composio_client, required
 
 
 async def check(service):

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import httpx
 
-from investigation_agent.integrations.composio import composio_client
+from skill_improve_cycle.common.integrations.composio import composio_client
 
 
 class ComposioConnectionTests(unittest.IsolatedAsyncioTestCase):
@@ -25,7 +25,7 @@ class ComposioConnectionTests(unittest.IsolatedAsyncioTestCase):
         async_client = httpx.AsyncClient
         with patch.dict(os.environ, {
             "COMPOSIO_API_KEY": "test-key", "COMPOSIO_GMAIL_CONNECTED_ACCOUNT_ID": "test-account",
-        }), patch("investigation_agent.integrations.composio.httpx.AsyncClient",
+        }), patch("skill_improve_cycle.common.integrations.composio.httpx.AsyncClient",
                   side_effect=lambda **kwargs: async_client(transport=httpx.MockTransport(respond), **kwargs)):
             await composio_client("gmail")
 
@@ -51,7 +51,7 @@ class ComposioConnectionTests(unittest.IsolatedAsyncioTestCase):
         async_client = httpx.AsyncClient
         with patch.dict(os.environ, {
             "COMPOSIO_API_KEY": "test-key", "COMPOSIO_GMAIL_CONNECTED_ACCOUNT_ID": "test-account",
-        }), patch("investigation_agent.integrations.composio.httpx.AsyncClient",
+        }), patch("skill_improve_cycle.common.integrations.composio.httpx.AsyncClient",
                   side_effect=lambda **kwargs: async_client(transport=httpx.MockTransport(respond), **kwargs)):
             with self.assertRaises(ValueError):
                 await composio_client("gmail")

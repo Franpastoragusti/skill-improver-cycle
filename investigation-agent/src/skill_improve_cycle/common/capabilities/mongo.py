@@ -7,7 +7,7 @@ from fastmcp.client.transports import StdioTransport
 from pydantic_ai.capabilities import Capability
 from pydantic_ai.mcp import MCPToolset
 
-from investigation_agent.paths import PROJECT_ROOT
+from skill_improve_cycle.common.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 

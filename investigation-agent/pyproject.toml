@@ -15,11 +15,12 @@ dependencies = [
 ]
 
 [project.scripts]
-investigate = "investigation_agent.cli:main"
-check-mcp = "investigation_agent.connections:main"
+investigate = "skill_improve_cycle.investigator.cli:main"
+improve = "skill_improve_cycle.improver.cli:main"
+check-mcp = "skill_improve_cycle.common.connections:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/investigation_agent"]
+packages = ["src/skill_improve_cycle"]
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "fastmcp-slim[server]==4.2.0"]
