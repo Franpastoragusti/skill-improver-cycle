@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "orders-investigation-agent"
+version = "0.1.0"
+description = "MCP connections for the skill improvement cycle demo."
+requires-python = ">=3.13,<3.16"
+dependencies = [
+    "httpx>=0.28,<1",
+    "pydantic-ai-slim[mcp]==2.66.0",
+]
+
+[project.scripts]
+check-mcp = "investigation_agent.connections:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/investigation_agent"]

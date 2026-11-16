@@ -1,0 +1,8 @@
+{
+  "name": "orders-investigation-mcp",
+  "private": true,
+  "description": "Pinned official MongoDB MCP server; no frontend.",
+  "dependencies": {
+    "mongodb-mcp-server": "3.3.0"
+  }
+}

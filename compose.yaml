@@ -1,0 +1,15 @@
+name: skill-improve-cycle
+services:
+  mongo:
+    image: mongo:8.0.4
+    ports:
+      - "127.0.0.1:27029:27017"
+    volumes:
+      - orders-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+volumes:
+  orders-data:
