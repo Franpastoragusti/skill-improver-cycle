@@ -17,8 +17,8 @@ from skill_improve_cycle.improver.runner import model_configuration as improver_
 from skill_improve_cycle.improver.cli import parse_args as improver_args
 
 
-@pytest.mark.parametrize("improve,code_mode", [(False, False), (False, True), (True, True)])
-async def test_each_role_loads_shared_skill_and_executes_native_tools(improve, code_mode):
+@pytest.mark.parametrize("improve", [False, True])
+async def test_roles_can_read_procedure_and_execute_native_tools(improve):
     server = FastMCP("role-check")
     observed = []
 
@@ -40,16 +40,21 @@ async def test_each_role_loads_shared_skill_and_executes_native_tools(improve, c
         step += 1
         if current == 0:
             assert not any(t.name == "fixture_lookup_customer" for t in info.function_tools)
-            tool = next(t for t in info.function_tools if t.name == "load_capability")
-            key = next(iter(tool.parameters_json_schema["properties"]))
-            return ModelResponse(parts=[ToolCallPart(tool.name, {key: "investigate-incident"})])
+            assert not any(t.name == "run_investigation_script" for t in info.function_tools)
+            assert not any(t.name == "read_file" for t in info.function_tools)
+            return ModelResponse(parts=[ToolCallPart("load_capability", {"id": "investigate-incident"})])
         if current == 1:
-            return ModelResponse(parts=[ToolCallPart("search_tools", {"queries": ["fixture_lookup_customer"]})])
+            loaded_context = str(messages) + (info.instructions or "")
+            assert "# Run the saved investigation" in loaded_context
+            return ModelResponse(parts=[ToolCallPart("run_code", {"code":
+                "procedure = await read_file(path='investigate-incident/references/direct-procedure.md')\nprocedure"})])
         if current == 2:
-            call = (ToolCallPart("run_code", {"code":
-                "customer = await fixture_lookup_customer()\ncustomer"}) if code_mode else
-                ToolCallPart("fixture_lookup_customer", {}))
-            return ModelResponse(parts=[call])
+            loaded_context = str(messages) + (info.instructions or "")
+            assert "## Ordered procedure and completion" in loaded_context
+            return ModelResponse(parts=[ToolCallPart("search_tools", {"queries": ["fixture_lookup_customer"]})])
+        if current == 3:
+            return ModelResponse(parts=[ToolCallPart("run_code", {"code":
+                "customer = await fixture_lookup_customer()\ncustomer"})])
         results = [p.model_response_object() for p in messages[-1].parts if isinstance(p, ToolReturnPart)]
         assert "Fixture Customer" in json.dumps(results)
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
@@ -61,7 +66,7 @@ async def test_each_role_loads_shared_skill_and_executes_native_tools(improve, c
     model = FunctionModel(respond, profile={"supported_native_tools": frozenset()})
     capabilities = [cap]
     agent = (build_improver(model, capabilities) if improve else
-             build_agent(model, capabilities, code_mode=code_mode))
+             build_agent(model, capabilities))
     async with agent:
         result = await agent.run("Check the shared skill and fixture tool only.")
     assert observed == ["lookup"]
@@ -77,7 +82,7 @@ def test_commands_select_independent_models_and_deadlines(monkeypatch):
     monkeypatch.setenv("IMPROVER_REASONING_EFFORT", "high")
     _, normal = parse_args(argv=["--sender", "customer@example.com"])
     _, research = improver_args(argv=["--sender", "customer@example.com"])
-    assert not normal.code_mode and normal.timeout == 300
+    assert not hasattr(normal, "code_mode") and normal.timeout == 300
     assert not hasattr(research, "code_mode") and research.timeout == 600
     assert model_configuration() == ("investigator-model", "medium")
     assert improver_configuration() == ("improver-model", "high")

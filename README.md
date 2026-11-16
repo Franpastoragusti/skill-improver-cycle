@@ -4,7 +4,7 @@ A staged demo: start with a procedure in Markdown, generate code to execute it, 
 
 ## Shared foundation
 
-This checkout contains the shared infrastructure and the phase-three investigator and script improver: two agents sharing one Markdown procedure and the same MCP connections.
+This checkout contains the shared infrastructure and the phase-four investigator and script improver: two agents sharing the same MCP connections, with a saved skill program and its original Markdown procedure.
 
 | Component | Purpose |
 | --- | --- |
@@ -93,22 +93,48 @@ Run `make setup` after updating this checkout to install the locked dependencies
 
 ```sh
 make up
-make investigate SENDER=customer@example.com CODE_MODE=0 SCENARIO=demo
-make investigate SENDER=customer@example.com CODE_MODE=1 SCENARIO=demo
+make investigate SENDER=customer@example.com SCENARIO=demo
 ```
 
 Replace the sender with the customer's seeded email and use the same scenario as
-`make seed`. Run the two investigations sequentially. Both select the latest inbox
-message from the sender, including read messages, identify the customer in Mongo,
-inspect orders and Logfire evidence, then create or reuse the Notion incident and
-read it back before returning a diagnosis. Repeated manual runs still investigate;
+`make seed`. Run investigations sequentially. The agent selects the latest inbox
+message from the sender, including read messages, identifies the customer in Mongo,
+inspects orders and Logfire evidence, then creates or reuses the Notion incident and
+reads it back before returning a diagnosis. Repeated manual runs still investigate;
 there is no processed-email ledger. Notion deduplication uses the Gmail message ID
 and is not an atomic uniqueness constraint.
 
-`CODE_MODE=0` calls tools directly. `CODE_MODE=1` enables native Code Mode so the
-investigator can generate Python for Monty to execute. Both modes use the same
-Markdown procedure. The investigator has no special instructions to optimize the
-whole process into one program; it remains the phase-two execution baseline.
+The investigator always uses Code Mode. It loads the short skill, discovers the
+script's native MCP dependencies together, supplies the current request parameters
+and invokes the saved program in Monty. The skill supplies a short invocation that reads the fixed file from a read-only
+mount and calls its asynchronous entry point inside Monty. The model supplies the
+parameters, not the investigation program. There is no custom script runner tool.
+
+The skill also defines recovery: if discovery or execution fails, the model reads
+the original procedure through native `read_file`, checks which effects
+actually completed, and continues the missing work using Code Mode. It verifies
+Notion before returning success and reports any unresolved blocker. Python does not
+select the fallback or automatically rerun the program. Neither normal execution
+nor recovery overwrites the packaged script.
+
+`LocalWorkspace` and `FileSystem(read_only=True)` expose the skill reference through
+native file tools. `CodeMode(mount=...)` exposes the same skill directory at `/skills`
+inside Monty. Only skill resources are mounted; no shell tool or environment files
+are needed. The short invocation is type-checked, but the body loaded via `exec`
+is parsed and executed at runtime, so its errors surface during execution.
+
+The script came from the successful improver run on November 16, 2026 at 12:36 UTC
+(trace `01a1e45ba7901425614f636f162999df`). Its literal input assignment was replaced by injected parameters, and the program
+was wrapped in `async def run_investigation(params)` with an explicit return. Its
+investigation control flow and tool calls were preserved.
+The request provides the sender, receiving mailbox, scenario, Mongo database,
+Logfire project, Notion database name and a fresh UTC timestamp. Collection names,
+Notion properties/statuses and the `orders-sync-demo` service are application
+contracts, not parameters for an arbitrary workflow.
+
+This phase reuses a prepared program and keeps recovery in the skill. Use the
+phase-two commit for the optional Code Mode versus direct-call comparison; this
+checkout no longer has a mode selector.
 
 ## Improve the investigation program
 
@@ -117,7 +143,7 @@ make improve SENDER=customer@example.com SCENARIO=demo
 ```
 
 This launches a different agent, `investigation-script-improver`, with Code Mode
-always enabled. It loads the same skill and MCP catalogs, generates a program,
+always enabled. It loads the preserved Markdown procedure and the same MCP catalogs, generates a program,
 executes it and uses execution errors to correct it. Its own CLI and runner select its model, deadline and tracing identity; the shared
 infrastructure does not route between agents. Its objective is a complete,
 verified investigation in as few programs as practical, ideally one. It has the
@@ -128,12 +154,12 @@ Logfire and may create or update its Notion incident. They use the same lookup a
 readback procedure, so run them sequentially with investigations. This is not an
 offline code generator. The generated programs and tool events are recorded through Logfire instrumentation;
 they are candidates for review, not automatically published into the skill.
-Persisting a reusable parameterized script and invoking it from the investigator
-belongs to phase four.
+Reviewed programs can replace the bundled script in a later version; improvement
+runs do not overwrite the saved program automatically.
 
 | Agent | Model setting (default) | Reasoning setting (default) | Deadline | Logfire service |
 | --- | --- | --- | --- | --- |
-| Investigator | `MODEL` (`openai:gpt-6-luna`) | `REASONING_EFFORT` (`high`) | 300 seconds | `orders-investigation-agent` |
+| Investigator | `MODEL` (`openai:gpt-6-luna`) | `REASONING_EFFORT` (`low`) | 300 seconds | `orders-investigation-agent` |
 | Script improver | `IMPROVER_MODEL` (`openai:gpt-6.1-sol`) | `IMPROVER_REASONING_EFFORT` (`high`) | 600 seconds | `investigation-script-improver` |
 
 Existing `.env` files can omit the new settings and use those defaults. They share
@@ -145,7 +171,7 @@ One successful case validates that path only. Discovery, unexpected schemas and
 recovery can require additional model calls or programs. Compare program counts,
 requests, tokens, time and verified outcomes; differences between these two agents
 also reflect their models and objectives, not just whether Code Mode is enabled.
-For the phase-two direct/Code Mode comparison, use `make investigate` for both.
+The improver still generates code; the investigator uses the saved script first.
 
 The commands do not print agent events, generated code, the final diagnosis or
 usage summaries. Inspect Logfire for the structured final result, model usage,
@@ -154,8 +180,7 @@ comes from PydanticAI instrumentation rather than console output.
 Whole-run deadlines include connection setup and are configurable with `--timeout`.
 After a timeout, inspect Notion before retrying because a write may have completed.
 
-There is no Temporal scheduler, automatic follow-up or stored Python skill script
-in this phase. `make recover` changes the orders; rerunning the investigation can
+There is no Temporal scheduler or automatic follow-up in this phase. `make recover` changes the orders; rerunning the investigation can
 then update the existing Notion incident according to the current order state.
 Historical failure traces alone do not mean the incident remains open.
 
@@ -168,7 +193,10 @@ investigation-agent/
     common/
       capabilities/                 Native MCP toolsets
       integrations/                 Composio sessions
-      skills/investigate-incident/  Shared Markdown procedure
+      skills/investigate-incident/
+        SKILL.md                    Short invocation instructions
+        references/direct-procedure.md  Original Markdown procedure
+        scripts/investigate.py      Parameterized Monty program
       composition.py                Skill and toolset composition
       runtime.py                    Input preparation and MCP setup
       command_support.py            CLI and telemetry primitives
@@ -192,8 +220,8 @@ Makefile                            Setup, simulator and agent commands
 
 1. Shared foundation.
 2. Markdown skill with optional Code Mode and concurrent independent reads.
-3. A separate Code Mode improver generates and refines the procedure into fewer programs (this phase).
-4. A validated parameterized script bundled with the skill.
+3. A separate Code Mode improver generates and refines the procedure into fewer programs.
+4. A validated parameterized script bundled with the skill (this phase).
 
 Each phase will be reviewed before its commit. Tags for the three agent stages will be created when those stages are validated. Temporal and automated follow-up are outside the initial talk's three-stage comparison.
 

@@ -80,7 +80,9 @@ def build_improver(model, capabilities):
         name="investigation-script-improver",
         instructions=[
             "You develop an executable program for the investigate-incident skill. "
-            "Load that skill, generate a program for the supplied reference case, execute "
+            "Use read_file to read investigate-incident/references/direct-procedure.md "
+            "from the workspace as the original Markdown procedure, "
+            "then generate a program for the supplied reference case, execute "
             "it and correct recoverable errors using the actual execution results. "
             "Your test runs use real MCP tools and may write the incident permitted by "
             "the skill. Verify those effects before reporting completion. "
@@ -89,6 +91,6 @@ def build_improver(model, capabilities):
             "general applicability. Write the final diagnosis in English.",
             IMPROVER_INSTRUCTIONS,
         ],
-        capabilities=build_capabilities(capabilities, code_mode=True),
+        capabilities=build_capabilities(capabilities),
         output_type=Diagnosis,
     )

@@ -11,7 +11,7 @@ from skill_improve_cycle.common.runtime import build_request, connect_capabiliti
 
 def model_configuration():
     return (os.getenv("MODEL", "openai:gpt-6-luna"),
-            os.getenv("REASONING_EFFORT", "high"))
+            os.getenv("REASONING_EFFORT", "low"))
 
 
 async def run(args):
@@ -19,7 +19,7 @@ async def run(args):
         request = build_request(args.sender, args.scenario)
         capabilities = await connect_capabilities()
         model, reasoning = model_configuration()
-        agent = build_agent(model, capabilities, code_mode=args.code_mode)
+        agent = build_agent(model, capabilities)
         async with agent:
             result = await agent.run(
                 request.model_dump_json(),
