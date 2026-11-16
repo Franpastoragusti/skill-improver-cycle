@@ -11,3 +11,6 @@ __pycache__/
 node_modules/
 dist/
 *.egg-info/
+
+# Recorded script failures are runtime data
+skill-registry/failures/

@@ -6,11 +6,11 @@ from skill_improve_cycle.common.composition import build_capabilities
 from skill_improve_cycle.common.models import Diagnosis
 
 
-def build_agent(model, capabilities):
+def build_agent(model, capabilities, skills_root=None):
     return Agent(
         model,
         name="orders-investigator",
         instructions="Load the investigate-incident skill and follow it to complete the requested investigation. Write the final diagnosis in English.",
-        capabilities=build_capabilities(capabilities),
+        capabilities=build_capabilities(capabilities, skills_root),
         output_type=Diagnosis,
     )

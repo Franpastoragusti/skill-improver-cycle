@@ -157,6 +157,50 @@ they are candidates for review, not automatically published into the skill.
 Reviewed programs can replace the bundled script in a later version; improvement
 runs do not overwrite the saved program automatically.
 
+## Close the loop: versions, failures and repair
+
+The skill lives in a local registry, `investigation-agent/skill-registry/`. Each
+revision (`r1`, `r2`, ...) is a complete copy of the skill with a `revision.json`;
+the `active` file names the revision that the investigator mounts and runs.
+
+```sh
+make investigate SENDER=customer@example.com   # runs the active revision
+make failures                                  # failures of the saved program
+make improve-failure ID=f20300101-120000       # repair -> candidate revision
+make skill-list
+make skill-diff REV=r2                         # review the change
+make skill-activate REV=r2                     # publish it
+make skill-rollback                            # return to the previous revision
+```
+
+1. **Detect.** After each investigation, the runner inspects the run for the saved
+   program's result. A script error, a `blocker` or `verification.complete` other than
+   true is recorded in `skill-registry/failures/` with the revision, the Logfire trace
+   ID and the request. The run itself is unchanged: the skill's Markdown recovery
+   still completes the task. Failure records are local runtime data and ignored by Git.
+2. **Classify.** Text rules assign `transient` (timeouts, rate limits, 5xx: no change),
+   `needs_human` (business conditions such as an ambiguous customer or duplicate
+   incidents, and anything unrecognized) or `contract` (runtime and tool-contract
+   errors). Only `contract` failures are repaired; `--force` overrides this.
+3. **Repair.** `improve-failure` runs the improver with the active program, the failure
+   and its trace ID. It reads the failing trace through the Logfire MCP (the same trace
+   contains the Markdown recovery), corrects the program and tests it with real tools
+   on the failed request. **This run may write the Notion incident.** The text that was
+   actually tested and verified is saved as a candidate revision. The improver cannot
+   write to the registry itself.
+4. **Gate.** A candidate can be activated only if it has a verified execution and passes
+   the static checks: one `async def run_investigation(params)` and nothing else at top
+   level, only the skill's twelve tools, only the known imports, and no `yield`,
+   `getattr`, `next`, `exec`, `eval` or `open`. A person reviews `skill-diff` and runs
+   `skill-activate`.
+5. **Roll back.** `skill-rollback` reactivates the revision that the active one replaced.
+
+Limits of this simple version: there are no regression tests against simulated MCP
+servers, so a candidate is proven only on the request that failed. Other branches are
+covered by the diff review and by rollback. Classification is a set of text rules, not
+a judgment. A run that times out or raises before returning records no failure.
+Repair is started by hand, one failure at a time.
+
 | Agent | Model setting (default) | Reasoning setting (default) | Deadline | Logfire service |
 | --- | --- | --- | --- | --- |
 | Investigator | `MODEL` (`openai:gpt-6-luna`) | `REASONING_EFFORT` (`low`) | 300 seconds | `orders-investigation-agent` |
@@ -193,11 +237,11 @@ investigation-agent/
     common/
       capabilities/                 Native MCP toolsets
       integrations/                 Composio sessions
-      skills/investigate-incident/
-        SKILL.md                    Short invocation instructions
-        references/direct-procedure.md  Original Markdown procedure
-        scripts/investigate.py      Parameterized Monty program
       composition.py                Skill and toolset composition
+      registry.py                   Skill revisions, activation and rollback
+      failures.py                   Failure detection, classification and queue
+      checks.py                     Static checks for candidate programs
+      skill_cli.py                  Revision and failure commands
       runtime.py                    Input preparation and MCP setup
       command_support.py            CLI and telemetry primitives
       connections.py                MCP connectivity checks
@@ -211,6 +255,16 @@ investigation-agent/
       agent.py
       runner.py
       cli.py
+      repair.py                     Repair from a recorded failure
+  skill-registry/
+    active                          Name of the active revision
+    revisions/r1/
+      revision.json                 Status, base, traces, checks
+      investigate-incident/
+        SKILL.md                    Short invocation instructions
+        references/direct-procedure.md  Original Markdown procedure
+        scripts/investigate.py      Parameterized Monty program
+    failures/                       Recorded failures (ignored by Git)
   mcp/mongodb/                      Official Node MCP server and lockfile
 compose.yaml                        Local MongoDB
 Makefile                            Setup, simulator and agent commands
@@ -221,7 +275,8 @@ Makefile                            Setup, simulator and agent commands
 1. Shared foundation.
 2. Markdown skill with optional Code Mode and concurrent independent reads.
 3. A separate Code Mode improver generates and refines the procedure into fewer programs.
-4. A validated parameterized script bundled with the skill (this phase).
+4. A validated parameterized script bundled with the skill.
+5. Skill revisions, failure-driven repair, a publication gate and rollback (this phase).
 
 Each phase will be reviewed before its commit. Tags for the three agent stages will be created when those stages are validated. Temporal and automated follow-up are outside the initial talk's three-stage comparison.
 

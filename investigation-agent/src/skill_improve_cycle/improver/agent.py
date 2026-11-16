@@ -74,7 +74,7 @@ Runtime compatibility (Monty is a Python subset, not CPython):
 
 
 
-def build_improver(model, capabilities):
+def build_improver(model, capabilities, skills_root=None):
     return Agent(
         model,
         name="investigation-script-improver",
@@ -91,6 +91,6 @@ def build_improver(model, capabilities):
             "general applicability. Write the final diagnosis in English.",
             IMPROVER_INSTRUCTIONS,
         ],
-        capabilities=build_capabilities(capabilities),
+        capabilities=build_capabilities(capabilities, skills_root),
         output_type=Diagnosis,
     )

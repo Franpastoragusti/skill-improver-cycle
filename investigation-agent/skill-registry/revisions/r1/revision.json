@@ -1,0 +1,10 @@
+{
+  "revision": "r1",
+  "status": "active",
+  "base_revision": null,
+  "reason": "Initial saved program, adapted from a successful improver run.",
+  "failure_id": null,
+  "source_traces": [],
+  "checks": {"passed": true, "problems": []},
+  "verification": {"complete": true}
+}

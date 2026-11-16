@@ -47,6 +47,8 @@ description: Run the saved order investigation program with the current request 
    using only its observed evidence. A verified empty inbox result is also complete.
 5. If discovery or script execution fails, or `verification.complete` is false,
    use `read_file` to read `investigate-incident/references/direct-procedure.md`.
+   Pass that relative path exactly. Do not add the `/skills/` prefix: that mount
+   exists only for `Path` inside `run_code`, and `read_file` rejects it.
    Follow that procedure with the current request and observed partial results.
    First establish what actually completed: a failed call can still have written
    data. Look up the selected message's incident and read it before deciding whether
