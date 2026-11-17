@@ -1,67 +1,91 @@
 # Skill improvement cycle
 
-A staged demo: start with a procedure in Markdown, generate code to execute it, then reuse a validated script inside the skill.
+A proof of concept that moves an agent skill from a Markdown procedure to a saved program, and then repairs that program when it fails.
 
-## Shared foundation
+The skill investigates order synchronization incidents: it finds a customer email in Gmail, the customer and their orders in MongoDB and the traces of the failed attempts in Logfire, then creates an incident in Notion and reads it back.
 
-This checkout contains the shared infrastructure and the phase-four investigator and script improver: two agents sharing the same MCP connections, with a saved skill program and its original Markdown procedure.
+![The investigation, in order](docs/images/01-investigation.png)
+
+The repository shows three things, in order:
+
+1. The agent follows the procedure in Markdown and calls the tools one at a time.
+2. A second agent, the improver, writes one program that does the whole investigation. That program is saved inside the skill, and the first agent runs it and does not write it again.
+3. When the saved program fails, the agent finishes the task with the Markdown procedure. The failure is recorded, the improver repairs the program from the trace, and a person approves the repair as a new revision of the skill.
+
+This is a guide that you can follow to run the same loop on your own skill. It is not a production system: [Limits](#limits) lists what it needs first.
+
+![From the request to the saved program](docs/images/02-saved-program.png)
+
+## Components
 
 | Component | Purpose |
 | --- | --- |
-| Orders app | Generate synthetic orders, controlled failures and recovery |
-| MongoDB | Persist customers, orders and synchronization attempts with native ObjectIds |
-| Logfire | Receive simulator traces and expose evidence through MCP |
-| Gmail through Composio | Provide the incident email |
-| Notion through Composio | Store the investigation result |
+| Orders app | Generates synthetic orders, controlled failures and recovery |
+| MongoDB | Stores customers, orders and synchronization attempts with native ObjectIds |
+| Logfire | Receives the simulator traces and the agent traces, and exposes them through MCP |
+| Gmail through Composio | Provides the incident email |
+| Notion through Composio | Stores the investigation result |
+| Investigator | The agent that runs the skill for a request |
+| Script improver | The agent that writes and repairs the saved program |
+| Skill registry | The revisions of the skill, the active one and the recorded failures |
 
-The simulator uses PyMongo and Logfire directly. Agent integrations expose the full native MCP toolsets through capabilities with deferred loading. The investigation procedure lives in the skill, not in integration wrappers.
+The simulator uses PyMongo and Logfire directly. The agents use the full native MCP toolsets, loaded on demand. The investigation procedure lives in the skill, not in integration code.
 
-## Setup
+## Quick start
 
-Install Docker with Compose, uv, Python 3.13, Node 22.12+ and npm. Docker must be running for local data checks.
-
-```sh
-make setup
-```
-
-Setup installs locked Python and Node dependencies and creates private `.env` files from the committed examples only when missing. It does not start services or call external APIs. Set `CUSTOMER_EMAIL` in `orders-app/.env` to the sender address you will use before seeding.
-
-Mongo runs on `127.0.0.1:27029`, in this repository's Compose project and volume, separate from the earlier demo. The default application database is `skill_orders_demo`.
-
-## Test the orders application
-
-First set `LOGFIRE_TOKEN` in `orders-app/.env` to a project write token. Both seed and recovery always send traces to Logfire and stop before changing orders if the token is missing. Mongo remains local.
+You need Docker with Compose, uv, Python 3.13, Node 22.12+ and npm. Docker must be running.
 
 ```sh
+make setup        # installs dependencies and creates the two .env files
+# fill in orders-app/.env and investigation-agent/.env (see "Configuration")
+make up           # starts the local MongoDB
 make seed SCENARIO=demo
-make check-mcp SERVICE=mongo
-make test
-make recover SCENARIO=demo
-make status
-make down
+make check-mcp    # checks Logfire, Gmail, Notion and Mongo
+make investigate SENDER=customer@example.com SCENARIO=demo
 ```
 
-The seed produces two customers, six orders and six attempts: three orders fail for Aster Labs because credential renewal is rejected; the control customer's three orders synchronize. Recovery retries the three failed orders, preserving their prior attempts. Both commands send telemetry to Logfire and also display it in the console.
+Before the last command, send an email from the customer address to the connected Gmail inbox. Replace `customer@example.com` with that address.
 
-Seeding is idempotent: rerunning a scenario does not reset recovered orders or change an existing customer's email. Use a new `SCENARIO` to create a fresh incident or after changing `CUSTOMER_EMAIL`. `down` preserves the data volume. Simulator tests use temporary databases and delete only those databases; they do not alter the demo scenario or send telemetry externally. Connection tests use an in-memory HTTP transport to verify Composio account selection and session requests without external access.
+The commands do not print the diagnosis. Read the result, the model usage and every tool call in Logfire.
 
-## Start the orders scenario again
+## Checkpoints
 
-```sh
-make reset-orders
-make seed
-```
+Each commit is a point where you can stop and run the project as it was at that step. Go to one with `git checkout` and its hash.
 
-`reset-orders` clears the `orders` and `sync_attempts` collections across all scenarios in the configured application database. It preserves customers, their ObjectIds, names and emails, all indexes and other collections. It resets only the demo customers' connection fields: Aster returns to rejected credential renewal and Cedar remains healthy. This restores the failure scenario even after recovery. The command starts Mongo if needed, does not reseed automatically and needs no Logfire token. The following `seed` reuses customers in the same scenario and creates fresh orders and attempts. It creates customers only when the selected scenario does not already contain them; changing `SCENARIO` intentionally creates a separate pair.
+| Commit | What it contains |
+| --- | --- |
+| `fefde7f` | The orders simulator, the local MongoDB and the four MCP connections. There is no agent yet |
+| `df1d5c4` | The 130-line Markdown skill and the agent. `make investigate` has the switch `CODE_MODE=0\|1`, so this is the place to compare direct tools with Code Mode |
+| `1a68e7a` | The improver as a separate agent, with `make improve` |
+| `9209c17` | The saved program, the short skill and the Markdown recovery. From here, `make investigate` always runs the saved program |
+| `f6b87c0` | The skill registry, the failure detection, the repair command and the checks before activation. `r1` is intact and active, so this is the place to break the program and run the loop yourself |
+| `de14167` | The state after one run of the loop: `r1` with a deliberate fault, `r2` active and the recorded failure |
 
-Other Mongo databases, Gmail messages, Notion incidents and historical Logfire traces remain unchanged. This phase has no Temporal schedules or worker to stop. Do not run seed, recovery or another database operation concurrently with reset.
+**The latest code is in the state after one run of the loop.** Revision `r2` is active. Revision `r1` contains the fault that was introduced on purpose to test the repair, so `make skill-rollback` returns to a program that fails, and `make skill-activate REV=r2` reports that `r2` is not a candidate. Use this state to read the two revisions and the recorded failure side by side. To run the loop yourself, start from `f6b87c0`.
 
-## Connect the external sources
+## Configuration
 
-1. In `orders-app/.env`, set `LOGFIRE_TOKEN` to a project write token. To generate real evidence, run `make seed SCENARIO=live-demo`. Use `make recover SCENARIO=live-demo` later to trace recovery.
-2. In `investigation-agent/.env`, set a Logfire API key with `project:read` access. Set `LOGFIRE_MCP_URL` to your region's endpoint (the example uses EU). Set `LOGFIRE_PROJECT` to the project containing the simulator traces. This guides the agent queries; the connectivity check only lists tools. Trace ingestion selects its destination through the simulator write token, not this variable. The agent environment also includes `LOGFIRE_TOKEN` for its own execution traces in phase 2. Use a write token from the same project; the agent will use a separate service name from the orders simulator. Phase 1 connection checks do not emit agent traces.
-3. In Composio, connect the Gmail inbox and Notion workspace. Put the Composio API key and both connected-account IDs in `investigation-agent/.env`. The key must allow reading connected accounts and creating tool-router sessions; executing tools in later phases also needs execution permission.
-4. Give the Notion connection access to an `Incidents` database with the properties below.
+`make setup` installs the locked Python and Node dependencies and creates private `.env` files from the committed examples, only when they are missing. It does not start services or call external APIs. Run it again after you change checkpoint, because the commands of each checkpoint are installed by it.
+
+Mongo runs on `127.0.0.1:27029`, in this repository's own Compose project and volume. The default application database is `skill_orders_demo`.
+
+**In `orders-app/.env`:**
+
+- `CUSTOMER_EMAIL`: the address from which you will send the incident email. Set it before you seed.
+- `LOGFIRE_TOKEN`: a project write token. Seeding and recovery always send traces to Logfire and stop before they change orders if the token is missing.
+
+**In `investigation-agent/.env`:**
+
+- `LOGFIRE_API_KEY`: a Logfire API key with `project:read` access, for the Logfire MCP.
+- `LOGFIRE_MCP_URL`: the MCP endpoint of your region. The example uses EU.
+- `LOGFIRE_PROJECT`: the project that contains the simulator traces. The agent uses it in its queries.
+- `LOGFIRE_TOKEN`: a write token of the same project, for the agents' own traces.
+- `COMPOSIO_API_KEY`, `COMPOSIO_GMAIL_CONNECTED_ACCOUNT_ID` and `COMPOSIO_NOTION_CONNECTED_ACCOUNT_ID`: connect the Gmail inbox and the Notion workspace in Composio first. The key must allow reading connected accounts, creating tool-router sessions and executing tools.
+- `GMAIL_ACCOUNT_EMAIL`: the receiving inbox.
+- `NOTION_DATABASE_NAME`: the name of the incidents database. The default is `Incidents`.
+- `OPENAI_API_KEY`, and optionally `MODEL`, `REASONING_EFFORT`, `IMPROVER_MODEL` and `IMPROVER_REASONING_EFFORT`.
+
+Give the Notion connection access to a database with these properties:
 
 | Property | Notion type |
 | --- | --- |
@@ -78,63 +102,65 @@ make check-mcp
 make check-mcp SERVICE=gmail
 ```
 
-`make check-mcp` checks Logfire, Gmail, Notion and Mongo by default, reporting each result even if another connection fails. It exits unsuccessfully if any check fails. Use `SERVICE=logfire|gmail|notion|mongo` to select one service. These checks initialize MCP and list its tools. Composio checks create an application-scoped session. They do not read email messages, execute application tools or write Notion pages. Successful tool listing proves connectivity, not that the future investigation workflow works.
+`make check-mcp` checks Logfire, Gmail, Notion and Mongo, and reports each result even if another connection fails. It exits unsuccessfully if any check fails. Use `SERVICE=logfire|gmail|notion|mongo` to select one service. The checks initialize MCP and list its tools; the Composio checks create an application-scoped session. They do not read email, execute application tools or write Notion pages. A successful tool listing proves connectivity, not that the investigation works.
 
-Private credentials are ignored by Git. No credentials, connected-account IDs or private data are bundled in this repository. The simulator and connectivity checks need no model key.
+Private credentials are ignored by Git. No credentials, connected-account IDs or private data are in this repository. The simulator and the connectivity checks need no model key.
+
+## The orders simulator
+
+```sh
+make seed SCENARIO=demo
+make recover SCENARIO=demo
+make status
+make down
+```
+
+The seed produces two customers, six orders and six attempts: three orders fail for Aster Labs because credential renewal is rejected, and the three orders of the control customer synchronize. Recovery retries the three failed orders and keeps their earlier attempts. Both commands send telemetry to Logfire and also show it in the console.
+
+Seeding is idempotent: running a scenario again does not reset recovered orders or change the email of an existing customer. Use a new `SCENARIO` to create a fresh incident, or after you change `CUSTOMER_EMAIL`. `make down` keeps the data volume.
+
+To start the scenario again:
+
+```sh
+make reset-orders
+make seed
+```
+
+`reset-orders` clears the `orders` and `sync_attempts` collections across all scenarios in the configured database. It keeps customers, their ObjectIds, names and emails, all indexes and other collections. It resets only the connection fields of the demo customers: Aster returns to rejected credential renewal and Cedar stays healthy. This restores the failure scenario even after recovery. The command starts Mongo if needed, does not seed and needs no Logfire token. The next `seed` reuses the customers of the same scenario and creates fresh orders and attempts.
+
+Other Mongo databases, Gmail messages, Notion incidents and earlier Logfire traces are not changed. Do not run seed, recovery or another database operation at the same time as a reset.
+
+## The two agents
+
+| Agent | Model setting (default) | Reasoning setting (default) | Deadline | Logfire service |
+| --- | --- | --- | --- | --- |
+| Investigator | `MODEL` (`openai:gpt-6-luna`) | `REASONING_EFFORT` (`low`) | 300 seconds | `orders-investigation-agent` |
+| Script improver | `IMPROVER_MODEL` (`openai:gpt-6.1-sol`) | `IMPROVER_REASONING_EFFORT` (`high`) | 600 seconds | `investigation-script-improver` |
+
+The two agents share `OPENAI_API_KEY`, the MCP credentials and the Logfire write token. `MODEL` affects only the investigator, and `IMPROVER_MODEL` only the improver. Every agent command accepts `--timeout`; the deadline covers the whole run, including the connection setup. After a timeout, look at Notion before you retry, because a write may have completed.
+
+The commands do not print agent events, generated code, the final diagnosis or usage summaries. Logfire has the structured final result, the model usage, the generated programs, the tool events, the retries and the span durations. Agent tracing includes model and tool content, so use demo data. The simulator traces use the service name `orders-sync-demo`.
+
+Differences between the two agents come from their models and objectives as well as from how they use Code Mode. One successful run validates only the path that it took.
 
 ## Run an investigation
-
-In `investigation-agent/.env`, configure `OPENAI_API_KEY`, `MODEL`,
-`GMAIL_ACCOUNT_EMAIL` (the receiving inbox), `NOTION_DATABASE_NAME`,
-`LOGFIRE_PROJECT` and `LOGFIRE_TOKEN`, along with the MCP credentials above.
-The agent uses service name `orders-investigation-agent`; simulator traces use
-`orders-sync-demo`. Agent tracing includes model and tool content, so use demo data.
-Run `make setup` after updating this checkout to install the locked dependencies.
 
 ```sh
 make up
 make investigate SENDER=customer@example.com SCENARIO=demo
 ```
 
-Replace the sender with the customer's seeded email and use the same scenario as
-`make seed`. Run investigations sequentially. The agent selects the latest inbox
-message from the sender, including read messages, identifies the customer in Mongo,
-inspects orders and Logfire evidence, then creates or reuses the Notion incident and
-reads it back before returning a diagnosis. Repeated manual runs still investigate;
-there is no processed-email ledger. Notion deduplication uses the Gmail message ID
-and is not an atomic uniqueness constraint.
+Replace the sender with the seeded customer email and use the same scenario as `make seed`. Run investigations one after another, not at the same time.
 
-The investigator always uses Code Mode. It loads the short skill, discovers the
-script's native MCP dependencies together, supplies the current request parameters
-and invokes the saved program in Monty. The skill supplies a short invocation that reads the fixed file from a read-only
-mount and calls its asynchronous entry point inside Monty. The model supplies the
-parameters, not the investigation program. There is no custom script runner tool.
+The agent selects the latest inbox message from the sender, including read messages, identifies the customer in Mongo, reads the orders and the Logfire evidence, then creates or reuses the Notion incident and reads it back before it returns a diagnosis. There is no ledger of processed emails, so a repeated run investigates again. Notion deduplication uses the Gmail message ID and is a lookup, not an atomic uniqueness constraint. `make recover` changes the orders, and a later investigation then updates the existing incident from the current order state. Earlier failure traces alone do not mean that the incident is still open.
 
-The skill also defines recovery: if discovery or execution fails, the model reads
-the original procedure through native `read_file`, checks which effects
-actually completed, and continues the missing work using Code Mode. It verifies
-Notion before returning success and reports any unresolved blocker. Python does not
-select the fallback or automatically rerun the program. Neither normal execution
-nor recovery overwrites the packaged script.
+The investigator always uses Code Mode. It loads the short skill, finds the twelve MCP tools of the program in one search, copies the parameters of the request and runs the saved program in Monty. The skill gives it a short fixed invocation that reads the program from a read-only mount and calls its asynchronous entry point. The model supplies the parameters, not the program, and there is no custom tool to run the script.
 
-`LocalWorkspace` and `FileSystem(read_only=True)` expose the skill reference through
-native file tools. `CodeMode(mount=...)` exposes the same skill directory at `/skills`
-inside Monty. Only skill resources are mounted; no shell tool or environment files
-are needed. The short invocation is type-checked, but the body loaded via `exec`
-is parsed and executed at runtime, so its errors surface during execution.
+The request provides the sender, the receiving mailbox, the scenario, the Mongo database, the Logfire project, the Notion database name and a fresh UTC timestamp. Collection names, Notion properties and statuses, and the `orders-sync-demo` service are contracts of this application, not parameters for an arbitrary workflow.
 
-The script came from the successful improver run on November 16, 2026 at 12:36 UTC
-(trace `01a1e45ba7901425614f636f162999df`). Its literal input assignment was replaced by injected parameters, and the program
-was wrapped in `async def run_investigation(params)` with an explicit return. Its
-investigation control flow and tool calls were preserved.
-The request provides the sender, receiving mailbox, scenario, Mongo database,
-Logfire project, Notion database name and a fresh UTC timestamp. Collection names,
-Notion properties/statuses and the `orders-sync-demo` service are application
-contracts, not parameters for an arbitrary workflow.
+The skill also defines the recovery. If the tool search or the program fails, the model reads the original procedure with `read_file`, checks which effects really happened and continues the missing work with Code Mode. It verifies Notion before it reports success, and it reports any blocker that it cannot resolve. Python code does not select the fallback or run the program again. Neither a normal run nor a recovery changes the program in the registry.
 
-This phase reuses a prepared program and keeps recovery in the skill. Use the
-phase-two commit for the optional Code Mode versus direct-call comparison; this
-checkout no longer has a mode selector.
+`LocalWorkspace` and `FileSystem(read_only=True)` expose the active revision of the skill through native file tools. `CodeMode(mount=...)` exposes the same directory at `/skills` inside Monty. Only the skill files are mounted: there is no shell tool and no access to environment files. The short invocation is type-checked, but the program loaded with `exec` is parsed and executed at run time, so its errors appear during execution.
 
 ## Improve the investigation program
 
@@ -142,96 +168,63 @@ checkout no longer has a mode selector.
 make improve SENDER=customer@example.com SCENARIO=demo
 ```
 
-This launches a different agent, `investigation-script-improver`, with Code Mode
-always enabled. It loads the preserved Markdown procedure and the same MCP catalogs, generates a program,
-executes it and uses execution errors to correct it. Its own CLI and runner select its model, deadline and tracing identity; the shared
-infrastructure does not route between agents. Its objective is a complete,
-verified investigation in as few programs as practical, ideally one. It has the
-Monty compatibility and chaining instructions; the investigator does not.
+This starts the other agent, `investigation-script-improver`. It reads the Markdown procedure of the active revision, uses the same MCP tools, writes a program, runs it and corrects it from the errors of each run. Its objective is a complete, verified investigation in as few programs as practical, ideally one. Its instructions contain the rules about what Monty supports and how to chain the calls; the investigator does not have them.
 
-**Improvement runs execute real tools:** they read the selected email, Mongo and
-Logfire and may create or update its Notion incident. They use the same lookup and
-readback procedure, so run them sequentially with investigations. This is not an
-offline code generator. The generated programs and tool events are recorded through Logfire instrumentation;
-they are candidates for review, not automatically published into the skill.
-Reviewed programs can replace the bundled script in a later version; improvement
-runs do not overwrite the saved program automatically.
+**Improvement runs execute the real tools.** They read the selected email, Mongo and Logfire, and they can create or update its Notion incident. Run them one after another with investigations. The generated programs and tool events are recorded in Logfire. They are candidates for review, and the improver does not write them into the skill.
 
-## Close the loop: versions, failures and repair
+The program in revision `r1` came from the first successful run of the improver. Its literal inputs were replaced by injected parameters, and the code was wrapped in `async def run_investigation(params)` with an explicit return. Its control flow and its tool calls were kept. The trace of that run is not in the repository.
 
-The skill lives in a local registry, `investigation-agent/skill-registry/`. Each
-revision (`r1`, `r2`, ...) is a complete copy of the skill with a `revision.json`;
-the `active` file names the revision that the investigator mounts and runs.
+## The repair loop
+
+![The repair loop](docs/images/03-repair-loop.png)
+
+The skill lives in a local registry, `investigation-agent/skill-registry/`. Each revision (`r1`, `r2`, ...) is a complete copy of the skill with a `revision.json`. The `active` file names the revision that the investigator mounts and runs.
 
 ```sh
 make investigate SENDER=customer@example.com   # runs the active revision
 make failures                                  # failures of the saved program
 make improve-failure ID=f20300101-120000       # repair -> candidate revision
 make skill-list
-make skill-diff REV=r2                         # review the change
-make skill-activate REV=r2                     # publish it
+make skill-diff REV=r3                         # review the change
+make skill-activate REV=r3                     # publish it
 make skill-rollback                            # return to the previous revision
 ```
 
-1. **Detect.** After each investigation, the runner inspects the run for the saved
-   program's result. A script error, a `blocker` or `verification.complete` other than
-   true is recorded in `skill-registry/failures/` with the revision, the Logfire trace
-   ID and the request. The run itself is unchanged: the skill's Markdown recovery
-   still completes the task. Failure records are local runtime data and ignored by Git.
-2. **Classify.** Text rules assign `transient` (timeouts, rate limits, 5xx: no change),
-   `needs_human` (business conditions such as an ambiguous customer or duplicate
-   incidents, and anything unrecognized) or `contract` (runtime and tool-contract
-   errors). Only `contract` failures are repaired; `--force` overrides this.
-3. **Repair.** `improve-failure` runs the improver with the active program, the failure
-   and its trace ID. It reads the failing trace through the Logfire MCP (the same trace
-   contains the Markdown recovery), corrects the program and tests it with real tools
-   on the failed request. **This run may write the Notion incident.** The text that was
-   actually tested and verified is saved as a candidate revision. The improver cannot
-   write to the registry itself.
-4. **Gate.** A candidate can be activated only if it has a verified execution and passes
-   the static checks: one `async def run_investigation(params)` and nothing else at top
-   level, only the skill's twelve tools, only the known imports, and no `yield`,
-   `getattr`, `next`, `exec`, `eval` or `open`. A person reviews `skill-diff` and runs
-   `skill-activate`.
-5. **Roll back.** `skill-rollback` reactivates the revision that the active one replaced.
+Use the failure ID that `make failures` prints and the revision name that `make improve-failure` prints.
 
-Limits of this simple version: there are no regression tests against simulated MCP
-servers, so a candidate is proven only on the request that failed. Other branches are
-covered by the diff review and by rollback. Classification is a set of text rules, not
-a judgment. A run that times out or raises before returning records no failure.
-Repair is started by hand, one failure at a time.
+1. **Detect.** After each investigation, the runner looks at the result of the saved program. A script error, a `blocker` or a `verification.complete` that is not true is recorded in `skill-registry/failures/`, with the revision, the Logfire trace ID and the request. The run itself is not changed: by then the Markdown recovery has finished the task. Failure records are local runtime data and Git ignores them. One record, with fictitious data, is committed as an example.
+2. **Classify.** Text rules assign one class: `transient` (timeouts, rate limits and 5xx responses, which need no change), `needs_human` (business conditions such as an ambiguous customer or duplicate incidents, and any error that the rules do not know) or `contract` (runtime errors and tool responses with an unexpected shape). Only `contract` failures are repaired, unless you pass `--force`.
+3. **Repair.** `improve-failure` runs the improver with the active program, the failure and its trace ID. The improver reads the trace through the Logfire MCP, corrects the program and tests it with the real tools on the request that failed. The same trace contains the Markdown recovery, which shows what works with the real data. **This run can write the Notion incident.** The registry saves the exact text that was tested and verified, as a candidate revision. The improver has no tool that can write to the registry.
+4. **Check and approve.** A candidate can be activated only if it has a verified run and passes the static checks: one `async def run_investigation(params)` and nothing else at the top level, only the twelve tools of the skill, only the known imports, and no `yield`, `getattr`, `next`, `exec`, `eval` or `open`. Then a person reads `skill-diff` and runs `skill-activate`.
+5. **Roll back.** `skill-rollback` activates again the revision that the active one replaced.
 
-| Agent | Model setting (default) | Reasoning setting (default) | Deadline | Logfire service |
-| --- | --- | --- | --- | --- |
-| Investigator | `MODEL` (`openai:gpt-6-luna`) | `REASONING_EFFORT` (`low`) | 300 seconds | `orders-investigation-agent` |
-| Script improver | `IMPROVER_MODEL` (`openai:gpt-6.1-sol`) | `IMPROVER_REASONING_EFFORT` (`high`) | 600 seconds | `investigation-script-improver` |
+## Limits
 
-Existing `.env` files can omit the new settings and use those defaults. They share
-`OPENAI_API_KEY`, MCP credentials and the Logfire write token. A `MODEL` override
-only affects the investigator; use `IMPROVER_MODEL` for the improver. Both CLI entry
-points accept `--timeout`. Run `make setup` to install the new `improve` entry point.
+This repository is a proof of concept. Before production, the loop needs at least these changes:
 
-One successful case validates that path only. Discovery, unexpected schemas and
-recovery can require additional model calls or programs. Compare program counts,
-requests, tokens, time and verified outcomes; differences between these two agents
-also reflect their models and objectives, not just whether Code Mode is enabled.
-The improver still generates code; the investigator uses the saved script first.
+- **Regression tests.** There are no tests of the program against simulated MCP servers, so a candidate is tested only on the request that failed. The diff review and the rollback cover the other branches.
+- **A better classification.** The classes come from text rules.
+- **Repairs that start without a person.** A person starts each repair, one failure at a time, and the repair test writes to the real Notion database.
+- **Detection of runs that return no result.** A run that times out or raises an exception before it returns records no failure.
+- **More evidence.** All the runs used one email and one customer, and the repaired fault was introduced on purpose.
 
-The commands do not print agent events, generated code, the final diagnosis or
-usage summaries. Inspect Logfire for the structured final result, model usage,
-generated programs, tool events, retries and span durations. Each runner calls `agent.run` directly and returns the diagnosis to its caller; observability
-comes from PydanticAI instrumentation rather than console output.
-Whole-run deadlines include connection setup and are configurable with `--timeout`.
-After a timeout, inspect Notion before retrying because a write may have completed.
+## Tests
 
-There is no Temporal scheduler or automatic follow-up in this phase. `make recover` changes the orders; rerunning the investigation can
-then update the existing Notion incident according to the current order state.
-Historical failure traces alone do not mean the incident remains open.
+```sh
+make test
+```
+
+The tests need Docker for the local Mongo, and they do not call a model or an external service.
+
+- **Simulator tests** use temporary databases and delete only those. They do not change the demo scenario or send telemetry.
+- **Connection tests** use an in-memory HTTP transport to check the Composio account selection and the session requests.
+- **Agent tests** use a fake model and an in-memory MCP server to check that both agents load the skill, read the procedure and call native tools through Monty.
+- **Loop tests** cover the failure detection, the classification, the static checks, the creation of a candidate, the activation and the rollback, in a temporary registry. They do not run `investigate.py` against simulated Gmail or Notion.
 
 ## Repository layout
 
 ```text
-orders-app/                         Simulator, tests and Python lockfile
+orders-app/                         Simulator, its tests and Python lockfile
 investigation-agent/
   src/skill_improve_cycle/
     common/
@@ -246,10 +239,10 @@ investigation-agent/
       command_support.py            CLI and telemetry primitives
       connections.py                MCP connectivity checks
       models.py                     Shared input and diagnosis
-      paths.py                      Local Node server location
+      paths.py                      Project root and Node server location
     investigator/
       agent.py
-      runner.py
+      runner.py                     Runs the active revision, records failures
       cli.py
     improver/
       agent.py
@@ -257,29 +250,19 @@ investigation-agent/
       cli.py
       repair.py                     Repair from a recorded failure
   skill-registry/
-    active                          Name of the active revision
-    revisions/r1/
-      revision.json                 Status, base, traces, checks
-      investigate-incident/
-        SKILL.md                    Short invocation instructions
-        references/direct-procedure.md  Original Markdown procedure
-        scripts/investigate.py      Parameterized Monty program
-    failures/                       Recorded failures (ignored by Git)
+    active                          Name of the active revision (r2)
+    revisions/
+      r1/                           First saved program, with the deliberate fault
+      r2/                           The repaired program
+        revision.json               Status, base, reason, traces, checks
+        investigate-incident/
+          SKILL.md                  Short invocation instructions
+          references/direct-procedure.md  Original Markdown procedure
+          scripts/investigate.py    Parameterized Monty program
+    failures/                       Recorded failures; one example is committed
+  tests/                            Agent, connection and loop tests
   mcp/mongodb/                      Official Node MCP server and lockfile
+docs/images/                        Figures of this README
 compose.yaml                        Local MongoDB
-Makefile                            Setup, simulator and agent commands
+Makefile                            Setup, simulator, agent and registry commands
 ```
-
-## Planned checkpoints
-
-1. Shared foundation.
-2. Markdown skill with optional Code Mode and concurrent independent reads.
-3. A separate Code Mode improver generates and refines the procedure into fewer programs.
-4. A validated parameterized script bundled with the skill.
-5. Skill revisions, failure-driven repair, a publication gate and rollback (this phase).
-
-Each phase will be reviewed before its commit. Tags for the three agent stages will be created when those stages are validated. Temporal and automated follow-up are outside the initial talk's three-stage comparison.
-
-## Dependency review note
-
-The pinned official MongoDB MCP server is version 3.3.0. At preparation time, `npm audit` reported advisories in its transitive `basic-ftp` dependency, propagated through proxy-support packages. The demo connects Mongo locally through stdio; this does not establish that the dependency is safe in every deployment. No forced downgrade or incompatible override has been applied. Review upstream fixes before broader distribution; inspect the current report with `npm audit --prefix investigation-agent/mcp/mongodb`.
